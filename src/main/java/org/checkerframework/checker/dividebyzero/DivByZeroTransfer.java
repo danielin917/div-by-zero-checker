@@ -18,6 +18,8 @@ import org.checkerframework.framework.type.QualifierHierarchy;
 import org.checkerframework.javacutil.AnnotationBuilder;
 import org.checkerframework.javacutil.AnnotationUtils;
 
+import static org.checkerframework.checker.dividebyzero.DivByZeroTransfer.BinaryOperator.TIMES;
+
 public class DivByZeroTransfer extends CFTransfer {
 
   enum Comparison {
@@ -76,7 +78,48 @@ public class DivByZeroTransfer extends CFTransfer {
    */
   private AnnotationMirror refineLhsOfComparison(
       Comparison operator, AnnotationMirror lhs, AnnotationMirror rhs) {
-    // TODO
+    switch (operator) {
+      case EQ:
+        return glb(lhs, rhs);
+      case NE:
+        if (equal(rhs, reflect(Zero.class))) {
+          // Special case we can rule out ZERO.
+          if (equal(lhs, reflect(NonNegative.class))) {
+            return glb(lhs, reflect(Positive.class));
+          } else if (equal(lhs, reflect(NonPositive.class))) {
+            return glb(lhs, reflect(Negative.class));
+          }
+          return glb(lhs, reflect(NonZero.class));
+        }
+        // We can't really rule anything out by just ruling one number that could be negative or positive.
+        return lhs;
+      case LT:
+        if (equal(rhs, reflect(Zero.class)) || equal(rhs, reflect(Negative.class))) {
+          return glb(lhs, reflect(Negative.class));
+        }
+        return lhs;
+      case LE:
+        if (equal(rhs, reflect(Zero.class)) || equal(rhs, reflect(NonPositive.class))) {
+          return glb(lhs, reflect(NonPositive.class));
+        }
+        if (equal(rhs, reflect(Negative.class))) {
+          return glb(lhs, reflect((Negative.class)));
+        }
+        return lhs;
+      case GT:
+        if (equal(rhs, reflect(Zero.class)) || equal(rhs, reflect(Positive.class))) {
+          return glb(lhs, reflect(Positive.class));
+        }
+        return lhs;
+      case GE:
+        if (equal(rhs, reflect(Zero.class)) || equal(rhs, reflect(NonNegative.class))) {
+          return glb(lhs, reflect(NonNegative.class));
+        }
+        if (equal(rhs, reflect(Positive.class))) {
+          return glb(lhs, reflect((Positive.class)));
+        }
+        return lhs;
+    }
     return lhs;
   }
 
@@ -97,8 +140,129 @@ public class DivByZeroTransfer extends CFTransfer {
    */
   private AnnotationMirror arithmeticTransfer(
       BinaryOperator operator, AnnotationMirror lhs, AnnotationMirror rhs) {
-    // TODO
+    switch (operator) {
+      case PLUS:
+        if (equal(lhs, reflect(Zero.class))) {
+          return rhs;
+        }
+
+        if (equal(rhs, reflect(Zero.class))) {
+          return lhs;
+        }
+
+        if (equal(lhs, bottom()) || equal(rhs, bottom())) {
+          return bottom();
+        }
+
+        if ((equal(lhs, reflect(Positive.class)) && equal(lub(rhs, reflect(NonNegative.class)),  reflect(NonNegative.class))) ||
+          (equal(rhs, reflect(Positive.class)) && equal(lub(lhs, reflect(NonNegative.class)),  reflect(NonNegative.class)))) {
+          return reflect(Positive.class);
+        }
+
+        if ((equal(lhs, reflect(Negative.class)) && equal(lub(rhs, reflect(NonPositive.class)),  reflect(NonPositive.class))) ||
+          (equal(rhs, reflect(Negative.class)) && equal(lub(lhs, reflect(NonPositive.class)),  reflect(NonPositive.class)))) {
+          return reflect(Negative.class);
+        }
+
+        return top();
+      case MINUS:
+        // Transform minus into add and negate.
+        return arithmeticTransfer(BinaryOperator.PLUS, lhs, negate(rhs));
+      case TIMES:
+        if (equal(lhs, reflect(Zero.class)) || equal(rhs, reflect(Zero.class))) {
+          return reflect(Zero.class);
+        }
+
+        // Positive just extends the other side.
+        if (equal(lhs, reflect(Positive.class))) {
+          return rhs;
+        }
+
+        if (equal(rhs, reflect(Positive.class))) {
+          return lhs;
+        }
+
+        // Negative flips the other side.
+        if (equal(lhs, reflect(Negative.class))) {
+          return negate(rhs);
+        }
+
+        if (equal(rhs, reflect(Negative.class))) {
+          return negate(lhs);
+        }
+
+        if (equal(lhs, reflect(NonNegative.class))) {
+          return addZero(rhs);
+        }
+
+        if (equal(rhs, reflect(NonNegative.class))) {
+          return addZero(lhs);
+        }
+
+        if (equal(lhs, reflect(NonPositive.class))) {
+
+          return addZero(negate(rhs));
+        }
+
+        if (equal(rhs, reflect(NonPositive.class))) {
+          return addZero(negate(lhs));
+        }
+
+        if (equal(lhs, reflect(NonZero.class)) && equal(rhs, reflect(NonZero.class))) {
+          return reflect(NonZero.class) ;
+        }
+        return top();
+      case DIVIDE:
+        return arithmeticTransfer(TIMES, lhs,  removeZero(rhs));
+      case MOD:
+        return arithmeticTransfer(TIMES, lhs,  removeZero(rhs));
+    }
     return top();
+  }
+
+  private AnnotationMirror negate(AnnotationMirror a) {
+    if (equal(a, reflect(NonNegative.class))) {
+      return reflect(NonPositive.class);
+    }
+    if (equal(a, reflect(NonPositive.class))) {
+      return reflect(NonNegative.class);
+    }
+    if (equal(a, reflect(Negative.class))) {
+      return reflect((Positive.class));
+    }
+    if (equal(a, reflect(Positive.class))) {
+      return reflect(Negative.class);
+    }
+    return a;
+  }
+
+  private AnnotationMirror addZero(AnnotationMirror a) {
+    if (equal(a, reflect(Negative.class))) {
+      return reflect(NonPositive.class);
+    }
+    if (equal(a, reflect(Positive.class))) {
+      return reflect(NonNegative.class);
+    }
+    if (equal(a, bottom())) {
+      return reflect(Zero.class);
+    }
+    if (equal(a, reflect(NonZero.class))) {
+      return top();
+    }
+    return a;
+  }
+
+  private AnnotationMirror removeZero(AnnotationMirror a) {
+    if (equal(a, reflect(NonPositive.class))) {
+      return reflect(Negative.class);
+    }
+    if (equal(a, reflect(NonNegative.class))) {
+      return reflect(Positive.class);
+    }
+    if (equal(a, top())) {
+      return reflect(NonZero.class);
+    }
+    return a;
   }
 
   // ========================================================================
@@ -301,7 +465,7 @@ public class DivByZeroTransfer extends CFTransfer {
   @Override
   public TransferResult<CFValue, CFStore> visitNumericalMultiplication(
       NumericalMultiplicationNode n, TransferInput<CFValue, CFStore> p) {
-    return implementOperator(BinaryOperator.TIMES, n, super.visitNumericalMultiplication(n, p));
+    return implementOperator(TIMES, n, super.visitNumericalMultiplication(n, p));
   }
 
   @Override

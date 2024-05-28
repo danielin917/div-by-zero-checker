@@ -5,9 +5,15 @@ import java.lang.annotation.Annotation;
 import java.util.EnumSet;
 import java.util.Set;
 import javax.lang.model.type.TypeKind;
-import org.checkerframework.checker.dividebyzero.qual.*;
+
+import org.checkerframework.checker.dividebyzero.qual.NonNegative;
+import org.checkerframework.checker.dividebyzero.qual.NonPositive;
+import org.checkerframework.checker.dividebyzero.qual.Top;
+import org.checkerframework.checker.dividebyzero.qual.Zero;
 import org.checkerframework.common.basetype.BaseTypeChecker;
 import org.checkerframework.common.basetype.BaseTypeVisitor;
+
+import static org.checkerframework.checker.dividebyzero.DivByZeroTransfer.BinaryOperator.DIVIDE;
 
 public class DivByZeroVisitor extends BaseTypeVisitor<DivByZeroAnnotatedTypeFactory> {
 
@@ -19,6 +25,15 @@ public class DivByZeroVisitor extends BaseTypeVisitor<DivByZeroAnnotatedTypeFact
           /* x %  y */ Tree.Kind.REMAINDER,
           /* x %= y */ Tree.Kind.REMAINDER_ASSIGNMENT);
 
+  private static final Set<
+    Class<? extends Annotation>
+    > ZERO_ANNOTATIONS =
+    Set.of(
+      /* x /  y */ Zero.class,
+      /* x /= y */ NonNegative.class,
+      /* x %  y */ NonPositive.class,
+      /* x %= y */ Top.class);
+
   /**
    * Determine whether to report an error at the given binary AST node. The error text is defined in
    * the messages.properties file.
@@ -29,6 +44,15 @@ public class DivByZeroVisitor extends BaseTypeVisitor<DivByZeroAnnotatedTypeFact
   private boolean errorAt(BinaryTree node) {
     // A BinaryTree can represent any binary operator, including + or -.
     // TODO
+    if (!DIVISION_OPERATORS.contains(node.getKind())) {
+      return false;
+    }
+
+    for (Class<? extends Annotation> ann : ZERO_ANNOTATIONS) {
+      if (hasAnnotation(node.getRightOperand(), ann)) {
+        return true;
+      }
+    }
     return false;
   }
 
@@ -42,7 +66,15 @@ public class DivByZeroVisitor extends BaseTypeVisitor<DivByZeroAnnotatedTypeFact
   private boolean errorAt(CompoundAssignmentTree node) {
     // A CompoundAssignmentTree represents any binary operator combined with an assignment,
     // such as "x += 10".
-    // TODO
+    if (!DIVISION_OPERATORS.contains(node.getKind())) {
+      return false;
+    }
+
+    for (Class<? extends Annotation> ann : ZERO_ANNOTATIONS) {
+      if (hasAnnotation(node.getExpression(), ann)) {
+        return true;
+      }
+    }
     return false;
   }
 
